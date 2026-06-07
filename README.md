@@ -47,9 +47,16 @@ Display in Streamlit UI
 
 ```
 Agentic AI ChatBot - LangGraph/
-├── langgraph_backend.py      # LangGraph chatbot logic & state management
-├── langgraph_frontend.py     # Streamlit UI & conversation handler
-└── README.md                 # This file
+├── langgraph_backend.py             # In-memory backend (basic)
+├── langgraph_frontend.py            # Standard frontend (blocking invoke)
+├── streaming_langgraph_frontend.py  # Streaming frontend (real-time)
+├── threading_langgraph_frontend.py  # Threading frontend (multi-thread)
+├── database_backend.py              # Database backend (SQLite storage)
+├── database_frontend.py             # Database frontend (persistent storage)
+├── .env                             # Environment variables (API keys)
+├── .gitignore                       # Git ignore file
+├── chatbot.db                       # SQLite database (auto-generated)
+└── README.md                        # This file
 ```
 
 ---
@@ -825,6 +832,296 @@ Thread 2:
 - Simple chatbot applications
 - No need for conversation history
 - Building minimal interfaces
+
+---
+
+## 💾 Persistent Database Storage
+
+### Overview
+
+The **database** feature enables permanent storage of conversations using SQLite, replacing in-memory storage. This ensures all chat histories persist across application restarts and multiple sessions.
+
+### Key Differences: In-Memory vs Database
+
+#### In-Memory Storage (Threading Frontend)
+- Conversations lost when app restarts
+- Data stored only in RAM
+- Fast but temporary
+- Good for development/testing
+
+#### Database Storage (Database Frontend)
+- Permanent conversation persistence
+- Data stored in SQLite file (`chatbot.db`)
+- Survives application crashes
+- Production-ready
+- Queryable via SQL
+
+### Backend Implementation: `database_backend.py`
+
+#### Key Changes from In-Memory Backend
+
+**Standard Backend**
+```python
+from langgraph.checkpoint.memory import InMemorySaver
+
+checkpointer = InMemorySaver()
+```
+
+**Database Backend**
+```python
+from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
+
+conn = sqlite3.connect('chatbot.db', check_same_thread=False)
+checkpointer = SqliteSaver(conn=conn)
+```
+
+#### Components Explanation
+
+**SQLite Connection**
+```python
+conn = sqlite3.connect('chatbot.db', check_same_thread=False)
+```
+- Creates/connects to `chatbot.db` SQLite database file
+- `check_same_thread=False`: Allows multi-threaded access
+- Database file persists on disk
+
+**SqliteSaver Checkpointer**
+```python
+checkpointer = SqliteSaver(conn=conn)
+```
+- LangGraph's built-in SQLite checkpoint manager
+- Automatically creates schema for conversation storage
+- Saves state after each interaction
+- Retrieves state when needed
+
+**Thread Retrieval Function**
+```python
+def retrieve_all_threads():
+    all_threads = set()
+    for checkpoint in checkpointer.list(None):
+        all_threads.add(checkpoint.config['configurable']['thread_id'])
+    return list(all_threads)
+```
+- Queries all stored threads from database
+- Fetches checkpoint history
+- Extracts unique thread IDs
+- Returns list of all conversations
+
+#### Graph Setup (Unchanged)
+```python
+graph = StateGraph(ChatState)
+graph.add_node("chat_node", chat_node)
+graph.add_edge(START, "chat_node")
+graph.add_edge("chat_node", END)
+
+chatbot = graph.compile(checkpointer=checkpointer)
+```
+- Same graph structure
+- Now uses database checkpointer instead of memory
+- All state saves go to SQLite
+
+### Frontend Implementation: `database_frontend.py`
+
+#### Enhanced Configuration
+
+**Extended CONFIG Structure**
+```python
+CONFIG = {
+    "configurable": {
+        'thread_id': st.session_state['thread_id']
+    },
+    "metadata": {
+        "thread_id": st.session_state['thread_id']
+    },
+    "run_name": "chat_turn"
+}
+```
+
+**Components:**
+- `configurable.thread_id`: For state retrieval/storage
+- `metadata.thread_id`: Additional context for queries
+- `run_name`: Labels each interaction for logging
+
+#### Thread Management with Database
+
+```python
+def load_conversation(thread_id):
+    state = chatbot.get_state(config={'configurable':{'thread_id':thread_id}})
+    return state.values.get('messages',[])
+```
+
+**Database Query Process:**
+1. `get_state()` queries SQLite for thread_id
+2. Checkpoint manager retrieves stored state
+3. Messages extracted from returned state
+4. Returned to frontend for display
+
+#### Persistence Flow
+
+```
+User Input
+    ↓
+Message added to session history
+    ↓
+Message sent to LLM via chatbot.stream()
+    ↓
+Backend processes with thread_id
+    ↓
+LLM generates response
+    ↓
+SqliteSaver checkpointer captures state
+    ↓
+State saved to chatbot.db:
+    ├─ Thread ID
+    ├─ Messages
+    ├─ Timestamps
+    └─ Metadata
+    ↓
+Response returned to frontend
+    ↓
+Frontend displays response
+    ↓
+Next session: Data persists in database
+```
+
+### Database Schema (Auto-Generated)
+
+SqliteSaver automatically creates the following tables:
+
+```sql
+-- Checkpoints table
+CREATE TABLE IF NOT EXISTS checkpoints (
+    thread_id TEXT,
+    checkpoint_ns TEXT,
+    checkpoint_id TEXT,
+    parent_checkpoint_id TEXT,
+    checkpoint BLOB,
+    metadata JSONB,
+    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+);
+```
+
+**Table Structure:**
+- `thread_id`: Conversation identifier
+- `checkpoint_ns`: Namespace for different graph instances
+- `checkpoint_id`: Unique checkpoint identifier
+- `parent_checkpoint_id`: Reference to previous state
+- `checkpoint`: Serialized state data (BLOB)
+- `metadata`: Additional context (JSON)
+
+### Running with Database
+
+```bash
+streamlit run database_frontend.py
+```
+
+### Benefits of Database Storage
+
+| Benefit | Description |
+|---------|-------------|
+| **Persistent Storage** | Conversations survive app restarts |
+| **Reliability** | No data loss on crashes or errors |
+| **Queryability** | Access conversations via SQL queries |
+| **Scalability** | Support unlimited conversations |
+| **Auditability** | Track conversation history and changes |
+| **Multi-user** | Share database across multiple instances |
+| **Backup** | Easy file-based backups (copy chatbot.db) |
+
+### Database Operations
+
+#### Retrieve All Threads from Database
+```python
+from database_backend import retrieve_all_threads
+
+all_threads = retrieve_all_threads()
+for thread_id in all_threads:
+    print(f"Thread: {thread_id}")
+```
+
+#### Query Specific Thread State
+```python
+state = chatbot.get_state(
+    config={'configurable': {'thread_id': 'thread-uuid'}}
+)
+messages = state.values.get('messages', [])
+```
+
+#### Clear Specific Thread (Delete)
+```python
+# Note: SqliteSaver doesn't have built-in delete
+# Manual SQL deletion:
+import sqlite3
+conn = sqlite3.connect('chatbot.db')
+cursor = conn.cursor()
+cursor.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
+conn.commit()
+```
+
+### Comparison: Storage Methods
+
+| Feature | In-Memory | Threading | Database |
+|---------|-----------|-----------|----------|
+| **Persistence** | ❌ | ❌ | ✅ |
+| **App Restarts** | Lost | Lost | Preserved |
+| **Queryable** | ❌ | ❌ | ✅ |
+| **Multi-Instance** | ❌ | ❌ | ✅ |
+| **Multiple Threads** | ❌ | ✅ | ✅ |
+| **Real-time Streaming** | ❌ | ✅ | ✅ |
+| **SQL Queries** | ❌ | ❌ | ✅ |
+| **Memory Usage** | Low | Medium | High |
+
+
+### When to Use Database Storage
+
+**Use Database when:**
+- Production applications
+- Need permanent conversation history
+- Multi-user scenarios
+- Conversation search/analytics required
+- Long-running applications
+- Backup/recovery needed
+- Multi-instance deployments
+
+**Use In-Memory when:**
+- Development/testing only
+- Single temporary sessions
+- Privacy-first (no storage)
+- Minimal resource usage
+- Disposable conversations
+
+### Migration Path: In-Memory to Database
+
+1. **Set up Database Backend**
+   ```bash
+   # Replace imports
+   from database_backend import chatbot
+   from langgraph.checkpoint.sqlite import SqliteSaver
+   ```
+
+2. **Update Frontend**
+   ```bash
+   streamlit run database_frontend.py
+   ```
+
+3. **Existing Sessions**
+   - Previous in-memory data is not migrated
+   - Start fresh with database
+   - Or export and reimport data
+
+### Project Structure (Final)
+
+```
+Agentic AI ChatBot - LangGraph/
+├── langgraph_backend.py             # In-memory backend (basic)
+├── langgraph_frontend.py            # Standard frontend (blocking invoke)
+├── streaming_langgraph_frontend.py  # Streaming frontend (real-time)
+├── threading_langgraph_frontend.py  # Threading frontend (multi-thread)
+├── database_backend.py              # Database backend (SQLite storage)
+├── database_frontend.py             # Database frontend (persistent storage)
+├── chatbot.db                       # SQLite database (auto-generated)
+└── README.md                        # This file
+```
 
 ---
 
