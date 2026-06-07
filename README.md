@@ -335,3 +335,204 @@ st.sidebar.info("Info about your bot")  # Add sidebar info
 
 ---
 
+## 🌊 Streaming Responses
+
+### Overview
+
+The **streaming** feature enables real-time response display, improving user experience by showing AI responses as they're generated instead of waiting for the complete response.
+
+### Key Difference: Invoke vs Stream
+
+#### **Standard Approach (Blocking)**
+```python
+response = chatbot.invoke(
+    {'messages': [HumanMessage(content=user_input)]},
+    config=CONFIG
+)
+# User must wait for entire response before seeing anything
+```
+
+#### **Streaming Approach (Non-Blocking)**
+```python
+for message_chunk, metadata in chatbot.stream(
+    {'messages': [HumanMessage(content=user_input)]},
+    config=CONFIG,
+    stream_mode='messages'
+):
+    # Process each chunk as it arrives
+    print(message_chunk.content)
+```
+
+---
+
+### Streaming Frontend Implementation
+
+#### File: `streaming_langgraph_frontend.py`
+
+**Key Components:**
+
+```python
+with st.chat_message('assistant'):
+    ai_message = st.write_stream(
+        message_chunk.content for message_chunk, metadata in chatbot.stream(
+            {'messages': [HumanMessage(content=user_input)]},
+            config=CONFIG,
+            stream_mode='messages'
+        )
+    )
+```
+
+**Breaking Down the Streaming Flow:**
+
+1. **`chatbot.stream()`** - Instead of `.invoke()`
+   - Returns a generator that yields message chunks as they arrive
+   - Processes from the LLM in real-time
+   - `stream_mode='messages'` tells LangGraph to stream individual message objects
+
+2. **Iteration: `for message_chunk, metadata in chatbot.stream(...)`**
+   - Each `message_chunk` is a partial message object
+   - Contains `.content` - the actual text being generated
+   - `metadata` provides additional context about the chunk
+
+3. **`st.write_stream(generator)`** - Streamlit's streaming display
+   - Accepts a generator/iterator
+   - Displays content as it's yielded
+   - Shows text appearing character-by-character in the UI
+   - Returns the complete accumulated message when done
+
+4. **Accumulation**
+   - `ai_message` stores the final complete response
+   - This is then saved to session state for history
+
+---
+
+### Streaming Execution Flow
+
+```
+User Input
+    ↓
+Frontend receives message
+    ↓
+User message displayed immediately
+    ↓
+Backend: chatbot.stream() starts
+    ├─ Connects to OpenAI LLM
+    ├─ LLM begins generating response
+    └─ Yields chunks as they arrive (e.g., "Hello", " ", "there", "...")
+    ↓
+Frontend: st.write_stream() processes chunks
+    ├─ Displays first chunk: "Hello"
+    ├─ Displays next chunk: " "
+    ├─ Displays next chunk: "there"
+    └─ Continues displaying all chunks in real-time
+    ↓
+Complete response accumulated
+    ↓
+Response saved to session history
+    ↓
+User sees complete message with streaming animation
+```
+
+---
+
+### Benefits of Streaming
+
+| Benefit | Description |
+|---------|-------------|
+| **Better UX** | Users see response appearing in real-time, not sudden block of text |
+| **Perception of Speed** | Feels faster because feedback is immediate, not delayed |
+| **Lower Latency Feel** | Users aren't staring at a blank screen waiting |
+| **Reduced Anxiety** | Immediate visual feedback that the system is working |
+| **Resource Efficiency** | Can process partial responses while still generating |
+
+---
+
+### Stream Mode Options
+
+#### `stream_mode='messages'`
+- **Streams individual message objects**
+- Each chunk is a `BaseMessage` subclass
+- Best for chat interfaces
+- Shows incremental message updates
+
+#### `stream_mode='values'`
+- Streams complete state updates
+- Returns entire ChatState object at each step
+- Better for debugging state transitions
+
+#### `stream_mode='updates'`
+- Streams only the changed portions
+- Shows what changed at each step
+- Useful for complex graphs
+
+---
+
+### Comparing Standard vs Streaming Implementation
+
+#### Standard Frontend (`langgraph_frontend.py`)
+```python
+response = chatbot.invoke(
+    {'messages': [HumanMessage(content=user_input)]},
+    config=CONFIG
+)
+# ❌ User waits silently
+st.session_state['message_history'].append({'role':'assistant','content':response})
+```
+
+#### Streaming Frontend (`streaming_langgraph_frontend.py`)
+```python
+with st.chat_message('assistant'):
+    ai_message = st.write_stream(
+        message_chunk.content for message_chunk, metadata in chatbot.stream(
+            {'messages': [HumanMessage(content=user_input)]},
+            config=CONFIG,
+            stream_mode='messages'
+        )
+    )
+# ✅ User sees response appearing in real-time
+st.session_state['message_history'].append({'role':'assistant','content':ai_message})
+```
+
+---
+
+### Running with Streaming
+
+```bash
+streamlit run streaming_langgraph_frontend.py
+```
+
+This loads the enhanced frontend with real-time response streaming.
+
+---
+
+### When to Use Streaming vs Invoke
+
+**Use Streaming when:**
+- Building interactive chat interfaces
+- Want immediate visual feedback
+- Displaying long-form responses
+- Improving perceived performance
+- Building real-time applications
+
+**Use Invoke when:**
+- Building batch processing pipelines
+- Need the complete response before proceeding
+- Processing responses programmatically
+- Working with non-streaming APIs
+- Building background jobs
+
+---
+
+## 🔄 Project Structure (Updated)
+
+```
+Agentic AI ChatBot - LangGraph/
+├── langgraph_backend.py             # Core chatbot logic (shared)
+├── langgraph_frontend.py            # Standard frontend (blocking invoke)
+├── streaming_langgraph_frontend.py  # Streaming frontend (real-time display)
+└── README.md                        # This file
+```
+
+---
+
+
