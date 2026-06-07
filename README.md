@@ -4,7 +4,7 @@ A modern conversational AI chatbot built with **LangGraph** and **Streamlit**, f
 
 ---
 
-## 📋 Project Overview
+## Project Overview
 
 This project implements an intelligent conversational agent that maintains context across multiple interactions. It combines:
 - **LangGraph**: For building stateful, agentic workflows
@@ -14,7 +14,7 @@ This project implements an intelligent conversational agent that maintains conte
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ### High-Level Flow Diagram
 
@@ -43,7 +43,7 @@ Display in Streamlit UI
 
 ---
 
-## 🔧 Project Structure
+## Project Structure
 
 ```
 Agentic AI ChatBot - LangGraph/
@@ -54,7 +54,7 @@ Agentic AI ChatBot - LangGraph/
 
 ---
 
-## 📖 Detailed Component Explanation
+## Detailed Component Explanation
 
 ### 1. **Backend: `langgraph_backend.py`**
 
@@ -165,7 +165,7 @@ user_input = st.chat_input('Type here')
 
 ---
 
-## 🔄 Complete Execution Flow
+## Complete Execution Flow
 
 ### Step-by-Step Walkthrough
 
@@ -208,7 +208,7 @@ user_input = st.chat_input('Type here')
 
 ---
 
-## 🚀 Installation & Setup
+## Installation & Setup
 
 ### Prerequisites
 - Python 3.8+
@@ -241,7 +241,7 @@ pip install langgraph langchain langchain-openai streamlit python-dotenv
 
 ---
 
-## 🎯 Running the Application
+## Running the Application
 
 ### Start the Streamlit frontend:
 ```bash
@@ -252,7 +252,7 @@ The application will open in your default browser at `http://localhost:8501`
 
 ---
 
-## 💬 How to Use
+## How to Use
 
 1. **Type a message** in the chat input box at the bottom
 2. **Press Enter** to send your message
@@ -275,7 +275,7 @@ Assistant: [Reformulates explanation based on conversation context]
 
 ---
 
-## 🔑 Key Concepts
+## Key Concepts
 
 ### State Management
 - **State Graph**: Defines the flow of data through nodes
@@ -299,7 +299,7 @@ Assistant: [Reformulates explanation based on conversation context]
 
 ---
 
-## ⚙️ Configuration Options
+## Configuration Options
 
 ### Modify LLM Model
 In `langgraph_backend.py`:
@@ -335,7 +335,7 @@ st.sidebar.info("Info about your bot")  # Add sidebar info
 
 ---
 
-## 🌊 Streaming Responses
+## Streaming Responses
 
 ### Overview
 
@@ -475,7 +475,7 @@ response = chatbot.invoke(
     {'messages': [HumanMessage(content=user_input)]},
     config=CONFIG
 )
-# ❌ User waits silently
+# User waits silently
 st.session_state['message_history'].append({'role':'assistant','content':response})
 ```
 
@@ -489,7 +489,7 @@ with st.chat_message('assistant'):
             stream_mode='messages'
         )
     )
-# ✅ User sees response appearing in real-time
+# User sees response appearing in real-time
 st.session_state['message_history'].append({'role':'assistant','content':ai_message})
 ```
 
@@ -523,7 +523,7 @@ This loads the enhanced frontend with real-time response streaming.
 
 ---
 
-## 🔄 Project Structure (Updated)
+## Project Structure (Updated)
 
 ```
 Agentic AI ChatBot - LangGraph/
