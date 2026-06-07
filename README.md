@@ -530,8 +530,301 @@ Agentic AI ChatBot - LangGraph/
 ├── langgraph_backend.py             # Core chatbot logic (shared)
 ├── langgraph_frontend.py            # Standard frontend (blocking invoke)
 ├── streaming_langgraph_frontend.py  # Streaming frontend (real-time display)
+├── threading_langgraph_frontend.py  # Multi-thread frontend (multiple conversations)
 └── README.md                        # This file
 ```
+
+---
+
+## 🧵 Multiple Conversation Threads
+
+### Overview
+
+The **threading** feature enables users to manage multiple independent conversations simultaneously, similar to having multiple chat tabs or threads. Each thread maintains its own context and message history independently.
+
+### Key Concepts
+
+#### Thread ID
+- **Unique Identifier**: Each conversation is identified by a unique thread ID
+- **Persistence**: Thread ID is stored in `InMemorySaver` checkpoint
+- **Isolation**: Messages in one thread don't affect others
+- **Generation**: Created using Python's `uuid.uuid4()` for uniqueness
+
+```python
+import uuid
+
+def generate_thread_id():
+    thread_id = uuid.uuid4()
+    return thread_id
+```
+
+### Threading Architecture
+
+```
+Thread Management System
+    ├── Thread 1 (UUID: abc-123)
+    │   ├─ Message: "Hi"
+    │   ├─ Response: "Hello!"
+    │   └─ State: Stored in InMemorySaver
+    │
+    ├── Thread 2 (UUID: def-456)
+    │   ├─ Message: "What is AI?"
+    │   ├─ Response: "AI is..."
+    │   └─ State: Stored separately
+    │
+    └── Thread 3 (UUID: ghi-789)
+        ├─ Message: "Tell me a joke"
+        ├─ Response: "Why did..."
+        └─ State: Independent context
+```
+
+### Frontend Implementation: `threading_langgraph_frontend.py`
+
+#### Session State Setup
+
+```python
+if 'message_history' not in st.session_state:
+    st.session_state['message_history'] = []
+
+if 'thread_id' not in st.session_state:
+    st.session_state['thread_id'] = generate_thread_id()
+
+if 'chat_threads' not in st.session_state:
+    st.session_state['chat_threads'] = []
+```
+
+**Components:**
+- `message_history`: Current thread's messages
+- `thread_id`: Currently active thread
+- `chat_threads`: List of all thread IDs
+
+#### Thread Management Functions
+
+**1. Generate Thread ID**
+```python
+def generate_thread_id():
+    thread_id = uuid.uuid4()
+    return thread_id
+```
+- Creates unique identifier for new thread
+- Uses UUID4 for global uniqueness
+
+**2. Reset Chat (New Thread)**
+```python
+def reset_chat():
+    thread_id = generate_thread_id()
+    st.session_state['thread_id'] = thread_id
+    add_thread(st.session_state['thread_id'])
+    st.session_state['message_history'] = []
+```
+- Generates new thread ID
+- Sets it as active thread
+- Clears message history for new thread
+- Registers thread in chat list
+
+**3. Add Thread**
+```python
+def add_thread(thread_id):
+    if thread_id not in st.session_state['chat_threads']:
+        st.session_state['chat_threads'].append(thread_id)
+```
+- Registers thread ID in the threads list
+- Prevents duplicates
+
+**4. Load Conversation**
+```python
+def load_conversation(thread_id):
+    state = chatbot.get_state(config={'configurable':{'thread_id':thread_id}})
+    return state.values.get('messages',[])
+```
+- Retrieves conversation history for specific thread
+- Accesses backend state using thread_id
+- Returns list of messages or empty list
+
+#### Sidebar UI for Thread Management
+
+```python
+st.sidebar.title("My ChatBot")
+
+if st.sidebar.button("New Chat"):
+    reset_chat()  # Create new thread
+
+st.sidebar.header("My Chats")
+
+for thread_id in st.session_state['chat_threads']:
+    if st.sidebar.button(str(thread_id)):
+        st.session_state['thread_id'] = thread_id
+        messages = load_conversation(thread_id)
+        # Convert to display format and load
+```
+
+**Features:**
+- "New Chat" button: Creates and switches to new thread
+- Thread list: Shows all available threads
+- Click to switch: Clicking thread button loads that conversation
+- Persistent display: All threads visible in sidebar
+
+#### Message Display with Thread Context
+
+```python
+# Loading the conversation history for active thread
+for message in st.session_state['message_history']:
+    with st.chat_message(message['role']):
+        st.text(message['content'])
+```
+- Displays only messages from current thread
+- Message history is specific to active thread_id
+
+#### User Input Processing with Thread ID
+
+```python
+if user_input:
+    # Add to current thread's history
+    st.session_state['message_history'].append({'role':'user','content':user_input})
+    
+    # Create config with current thread ID
+    CONFIG = {'configurable':{'thread_id':st.session_state['thread_id']}}
+    
+    # Send to chatbot with thread context
+    ai_message = st.write_stream(
+        message_chunk.content for message_chunk, metadata in chatbot.stream(
+            {'messages':[HumanMessage(content=user_input)]},
+            config=CONFIG,
+            stream_mode='messages'
+        )
+    )
+```
+
+**Flow:**
+1. User message added to current thread's history
+2. CONFIG includes current thread_id
+3. Backend receives thread_id and maintains separate state
+4. Response stored in current thread's history only
+
+### Threading Execution Flow
+
+```
+User Creates Thread 1
+    ↓
+User message: "Hello"
+    ├─ Added to Thread 1 history
+    ├─ Backend receives thread_id='thread-1'
+    ├─ LLM processes in Thread 1 context
+    └─ Response stored in Thread 1
+    ↓
+User Creates Thread 2 ("New Chat")
+    ├─ New UUID generated
+    ├─ Thread 1 saved in chat_threads
+    ├─ Thread 2 becomes active
+    └─ Message history cleared
+    ↓
+User message in Thread 2: "What is AI?"
+    ├─ Added to Thread 2 history
+    ├─ Backend receives thread_id='thread-2'
+    ├─ Thread 1 context is NOT used
+    ├─ LLM processes independently
+    └─ Response stored in Thread 2
+    ↓
+User Switches Back to Thread 1
+    ├─ load_conversation(thread-1) called
+    ├─ Backend retrieves Thread 1 state
+    ├─ Message history reloaded
+    └─ Displays full Thread 1 conversation
+    ↓
+User Continues Thread 1: "How are you?"
+    ├─ Message added to Thread 1 (not Thread 2)
+    ├─ Backend receives thread_id='thread-1'
+    ├─ LLM has full Thread 1 context
+    └─ Response maintains Thread 1 context
+```
+
+### Benefits of Threading
+
+| Benefit | Description |
+|---------|-------------|
+| **Context Isolation** | Different threads don't interfere with each other |
+| **Multi-tasking** | Handle multiple conversations without losing context |
+| **Easy Switching** | Switch between conversations with one click |
+| **Parallel Planning** | Work on different topics simultaneously |
+| **Conversation History** | Easy access to all previous conversations |
+| **Clean Separation** | Each thread has independent LLM context |
+
+### Running with Threading
+
+```bash
+streamlit run threading_langgraph_frontend.py
+```
+
+This loads the enhanced frontend with multiple conversation thread support.
+
+### User Workflow
+
+1. **Start Default Thread**
+   - App opens with Thread 1
+   - Chat normally with the AI
+
+2. **Create New Thread**
+   - Click "New Chat" in sidebar
+   - Fresh conversation starts
+   - Previous thread saved
+
+3. **Switch Between Threads**
+   - Click thread UUID in "My Chats" sidebar
+   - Full conversation history loads
+   - Continue where you left off
+
+4. **Multiple Independent Conversations**
+   - Each thread maintains complete context
+   - No message leakage between threads
+   - Can switch freely without losing data
+
+### Threading vs Standard Frontend
+
+| Feature | Standard | Streaming | Threading |
+|---------|----------|-----------|----------|
+| Multiple Conversations | ❌ | ❌ | ✅ |
+| Real-time Streaming | ❌ | ✅ | ✅ |
+| Thread Switching | ❌ | ❌ | ✅ |
+| Persistent Threads | ❌ | ❌ | ✅ |
+| Session State | ✅ | ✅ | ✅ |
+| Context Isolation | N/A | N/A | ✅ |
+
+
+### Comparison: Single vs Multi-Thread Flow
+
+**Single Thread (Standard Frontend)**
+```
+User 1: "Hi"
+ Assistant: "Hello!"
+User 2: "What is AI?"  ← Context includes "Hi" and "Hello!"
+Assistant: "AI is..."  ← Mixed context
+```
+
+**Multi-Thread (Threading Frontend)**
+```
+Thread 1:
+  User: "Hi"
+  Assistant: "Hello!"
+
+Thread 2:
+  User: "What is AI?"
+  Assistant: "AI is..."  ← No "Hi" context
+```
+
+### When to Use Threading
+
+**Use Threading when:**
+- Users need to manage multiple conversations
+- Working on different topics simultaneously
+- Need conversation history and easy switching
+- Building multi-project or multi-topic applications
+- Requiring context isolation between conversations
+
+**Use Standard/Streaming when:**
+- Single, focused conversation
+- Simple chatbot applications
+- No need for conversation history
+- Building minimal interfaces
 
 ---
 
